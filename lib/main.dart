@@ -30,6 +30,26 @@ class _TouchTracer extends StatefulWidget {
   State<_TouchTracer> createState() => _TouchTracerState();
 }
 
+class DefaultDrawStrokeProperties {
+  /// Parameters for event proceccing
+  static const bool processAndDrawPressure = true;
+
+  /// Parameters for the perfect_freehand stroke processing
+  static const double size = 3;
+  static const double thinning = 0.2;
+  static const double smoothing = 0;
+  static const double streamline = 0.5;
+  static const double taperStart = 0;
+  static const double taperEnd = 0;
+  static const bool capStart = true;
+  static const bool capEnd = true;
+  static const bool simulatePressure = false;
+
+  /// Parameters for flutter's Path drawing
+  static const Color color = Color.fromARGB(255, 97, 25, 74);
+  static const int powerOfPathCurveDrawnOnCanvas = 1;
+}
+
 // State of teh touch tracer
 class _TouchTracerState extends State<_TouchTracer> {
   // one empty stroke stored in the past strokes
@@ -37,8 +57,6 @@ class _TouchTracerState extends State<_TouchTracer> {
 
   // Value notifier initialized to be an empty stroke
   final _currentStroke = ValueNotifier<_Stroke?>(null);
-
-  static const receiveAndDrawPressure = true;
 
   @override
   void dispose() {
@@ -48,7 +66,7 @@ class _TouchTracerState extends State<_TouchTracer> {
   }
 
   void _onPointerDown(PointerDownEvent event) {
-    _currentStroke.value = const _Stroke([], receiveAndDrawPressure ? [] : null);
+    _currentStroke.value = const _Stroke([], DefaultDrawStrokeProperties.processAndDrawPressure ? [] : null);
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -56,8 +74,8 @@ class _TouchTracerState extends State<_TouchTracer> {
     if (currentStroke == null) {
       return;
     }
-    _currentStroke.value =
-        currentStroke.copyWithPoint(event.localPosition, receiveAndDrawPressure ? event.pressure : null);
+    _currentStroke.value = currentStroke.copyWithPoint(
+        event.localPosition, DefaultDrawStrokeProperties.processAndDrawPressure ? event.pressure : null);
   }
 
   void _onPointerEnd(PointerUpEvent event) {
@@ -73,6 +91,10 @@ class _TouchTracerState extends State<_TouchTracer> {
 
   void _onClearStrokes() {
     _pastStrokes.value = [];
+  }
+
+  void _onRedrawPastStrokes() {
+    _pastStrokes.value = _pastStrokes.value.toList();
   }
 
   @override
@@ -94,7 +116,16 @@ class _TouchTracerState extends State<_TouchTracer> {
             ),
             Align(
               alignment: Alignment.bottomRight,
-              child: IconButton(onPressed: _onClearStrokes, icon: Icon(Icons.ac_unit_outlined)),
+              child: SizedBox(
+                width: 100,
+                height: 100,
+                child: Row(
+                  children: [
+                    IconButton(onPressed: _onClearStrokes, icon: const Icon(Icons.ac_unit_outlined)),
+                    IconButton(onPressed: _onRedrawPastStrokes, icon: const Icon(Icons.redo)),
+                  ],
+                ),
+              ),
             )
           ],
         ),
@@ -177,36 +208,46 @@ void _drawStroke(Canvas canvas, _Stroke stroke) {
       point = Point(stroke.points[i].dx, stroke.points[i].dy);
     }
     pointsList.add(point);
-    //print("Point x: \t${point.x} y: \t${point.y} p: \t${point.p}");
   }
 
-  /*
   final outlinePoints = getStroke(
-    stroke.points.map((point) => Point(point.dx, point.dy)).toList(),
-    size: 1,
-    simulatePressure: false,
-
-    /// Note: it was found in practice that the stroke changing while writing
-    /// felt off. This might be a bug in the library or could be the result of
-    /// the current performance. This behavior should be re-evaluated in the future.
-    isComplete: true,
+    pointsList,
+    size: DefaultDrawStrokeProperties.size,
+    thinning: DefaultDrawStrokeProperties.thinning,
+    smoothing: DefaultDrawStrokeProperties.smoothing,
+    streamline: DefaultDrawStrokeProperties.streamline,
+    taperStart: DefaultDrawStrokeProperties.taperStart,
+    taperEnd: DefaultDrawStrokeProperties.taperEnd,
+    capStart: DefaultDrawStrokeProperties.capStart,
+    capEnd: DefaultDrawStrokeProperties.capEnd,
+    simulatePressure: DefaultDrawStrokeProperties.simulatePressure,
   );
-  */
-  final outlinePoints =
-      getStroke(pointsList, size: 3, simulatePressure: false, isComplete: true, smoothing: 1, thinning: 0.5);
-  print(
-      "lenghts ${(outlinePoints.length / pointsList.length).toStringAsFixed(2)} ${pointsList.length}, ${outlinePoints.length}");
 
   final path = Path();
 
   // Otherwise, draw a line that connects each point with a bezier curve segment.
   path.moveTo(outlinePoints[0].x, outlinePoints[0].y);
 
-  for (int i = 1; i < outlinePoints.length - 1; ++i) {
+  for (int i = 1; i < outlinePoints.length - 1; i++) {
     final p0 = outlinePoints[i];
-    final p1 = outlinePoints[i + 1];
-    path.quadraticBezierTo(p0.x, p0.y, ((p0.x + p1.x) / 2), ((p0.y + p1.y) / 2));
+    switch (DefaultDrawStrokeProperties.powerOfPathCurveDrawnOnCanvas) {
+      case 1:
+        path.lineTo(p0.x, p0.y);
+        break;
+      case 2:
+        final p1 = outlinePoints[i + 1];
+        path.quadraticBezierTo(p0.x, p0.y, ((p0.x + p1.x) / 2), ((p0.y + p1.y) / 2));
+        break;
+      case 3:
+        if (i >= outlinePoints.length - 1) break;
+        final p1 = outlinePoints[i + 1];
+        final p2 = outlinePoints[i + 2];
+        path.cubicTo(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+        break;
+      default:
+        break;
+    }
   }
 
-  canvas.drawPath(path, Paint()..color = Colors.red);
+  canvas.drawPath(path, Paint()..color = DefaultDrawStrokeProperties.color);
 }
