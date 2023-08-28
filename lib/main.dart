@@ -53,7 +53,7 @@ class DefaultDrawStrokeProperties {
 // State of teh touch tracer
 class _TouchTracerState extends State<_TouchTracer> {
   // one empty stroke stored in the past strokes
-  final _pastStrokes = ValueNotifier<List<_Stroke>>([]);
+  final _pastStrokes = ValueNotifier<List<List<Point>>>([]);
 
   // Value notifier initialized to be an empty stroke
   final _currentStroke = ValueNotifier<_Stroke?>(null);
@@ -83,7 +83,7 @@ class _TouchTracerState extends State<_TouchTracer> {
     if (endedStroke == null) {
       return;
     }
-    _pastStrokes.value.add(endedStroke);
+    _pastStrokes.value.add(_processStroke(endedStroke)!);
     // set copy to trigger re-draw
     _pastStrokes.value = _pastStrokes.value.toList();
     _currentStroke.value = null;
@@ -138,6 +138,7 @@ class _Stroke {
   const _Stroke(this.points, [this.pressures]);
   final List<Offset> points;
   final List<double>? pressures;
+  //final List<Point>? canvasPoints;
 
   // Add a point to the copy of list of points and return this new extended copy
   _Stroke copyWithPoint(Offset point, [double? pressure]) {
@@ -154,7 +155,7 @@ class _Stroke {
 
 class _PastStrokePainter extends CustomPainter {
   const _PastStrokePainter({required this.listener}) : super(repaint: listener);
-  final ValueNotifier<List<_Stroke>> listener;
+  final ValueNotifier<List<List<Point>>> listener;
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) {
@@ -163,13 +164,14 @@ class _PastStrokePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final strokes = listener.value;
-    if (strokes.isEmpty) {
+    final pointLists = listener.value;
+    if (pointLists.isEmpty) {
       return;
     }
 
-    for (var stroke in strokes) {
-      _drawStroke(canvas, stroke);
+    for (var pointList in pointLists) {
+      _drawPointsFromList(canvas, pointList);
+      //_drawStroke(canvas, stroke);
     }
   }
 }
@@ -194,9 +196,9 @@ class _CurrentStrokePainter extends CustomPainter {
   }
 }
 
-void _drawStroke(Canvas canvas, _Stroke stroke) {
+List<Point>? _processStroke(_Stroke stroke) {
   if (stroke.points.isEmpty) {
-    return;
+    return null;
   }
 
   final List<Point> pointsList = [];
@@ -223,25 +225,30 @@ void _drawStroke(Canvas canvas, _Stroke stroke) {
     simulatePressure: DefaultDrawStrokeProperties.simulatePressure,
   );
 
+  return outlinePoints;
+}
+
+// Draw an already processed path
+void _drawPointsFromList(Canvas canvas, List<Point> pointsList) {
   final path = Path();
 
   // Otherwise, draw a line that connects each point with a bezier curve segment.
-  path.moveTo(outlinePoints[0].x, outlinePoints[0].y);
+  path.moveTo(pointsList[0].x, pointsList[0].y);
 
-  for (int i = 1; i < outlinePoints.length - 1; i++) {
-    final p0 = outlinePoints[i];
+  for (int i = 1; i < pointsList.length - 1; i++) {
+    final p0 = pointsList[i];
     switch (DefaultDrawStrokeProperties.powerOfPathCurveDrawnOnCanvas) {
       case 1:
         path.lineTo(p0.x, p0.y);
         break;
       case 2:
-        final p1 = outlinePoints[i + 1];
+        final p1 = pointsList[i + 1];
         path.quadraticBezierTo(p0.x, p0.y, ((p0.x + p1.x) / 2), ((p0.y + p1.y) / 2));
         break;
       case 3:
-        if (i >= outlinePoints.length - 1) break;
-        final p1 = outlinePoints[i + 1];
-        final p2 = outlinePoints[i + 2];
+        if (i >= pointsList.length - 1) break;
+        final p1 = pointsList[i + 1];
+        final p2 = pointsList[i + 2];
         path.cubicTo(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
         break;
       default:
@@ -250,4 +257,11 @@ void _drawStroke(Canvas canvas, _Stroke stroke) {
   }
 
   canvas.drawPath(path, Paint()..color = DefaultDrawStrokeProperties.color);
+}
+
+void _drawStroke(Canvas canvas, _Stroke stroke) {
+  List<Point>? outlinePoints = _processStroke(stroke);
+  if (outlinePoints == null) return;
+
+  _drawPointsFromList(canvas, outlinePoints);
 }
