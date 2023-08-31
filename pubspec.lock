@@ -127,9 +127,9 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: HEAD
-      resolved-ref: "066461ee27342559e5731a03e3371c0537f1abcb"
-      url: "https://github.com/steveruizok/perfect-freehand-dart"
+      ref: clean-caps
+      resolved-ref: "90c9dcbdd1cbb2c704be1c729d255b1ae4770afe"
+      url: "https://github.com/dodgog/perfect-freehand-dart/"
     source: git
     version: "1.0.4"
   sky_engine:
