@@ -1,9 +1,12 @@
+import 'dart:ffi' hide Size;
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
+import 'package:delaunay/delaunay.dart';
 
 void main() {
   runApp(const MyApp());
@@ -41,7 +44,7 @@ class DefaultDrawStrokeProperties {
   static const bool processAndDrawPressure = true;
 
   /// Parameters for the perfect_freehand stroke processing
-  static const double size = 1;
+  static const double size = 5;
   static const double thinning = 0; //0.2;
   static const double smoothing = 0.8; //0;
   static const double streamline = 0.5;
@@ -54,6 +57,8 @@ class DefaultDrawStrokeProperties {
   /// Parameters for flutter's Path drawing
   static const Color color = Color.fromARGB(255, 97, 25, 74);
   static const int powerOfPathCurveDrawnOnCanvas = 1;
+
+  static const bool drawDelaunay = true;
 }
 
 // State of teh touch tracer
@@ -190,8 +195,12 @@ class _PastStrokePainter extends CustomPainter {
     }
 
     for (var pointList in pointLists) {
-      //_drawPointsFromList(canvas, pointList);
-      _centeredDrawPointsFromList(canvas, pointList, size);
+      //_centeredDrawPointsFromList(canvas, pointList, size);
+      if (DefaultDrawStrokeProperties.drawDelaunay == true) {
+        _centeredDrawVerticesFromPointsList(canvas, pointList, size);
+      } else {
+        _drawPointsFromList(canvas, pointList);
+      }
     }
   }
 }
@@ -212,7 +221,14 @@ class _CurrentStrokePainter extends CustomPainter {
       return;
     }
 
-    _drawStroke(canvas, stroke);
+    List<Point>? outlinePoints = _processStroke(stroke);
+
+    if (DefaultDrawStrokeProperties.drawDelaunay == true) {
+      _centeredDrawVerticesFromPointsList(canvas, outlinePoints!, size);
+    } else {
+      if (outlinePoints == null) return;
+      _drawPointsFromList(canvas, outlinePoints);
+    }
   }
 }
 
@@ -277,15 +293,13 @@ void _drawPointsFromList(Canvas canvas, List<Point> pointsList) {
       default:
         break;
     }
-    //path.close();
-    path.fillType = PathFillType.nonZero;
   }
 
   canvas.drawPath(
       path,
       Paint()
         ..color = DefaultDrawStrokeProperties.color
-        ..style = PaintingStyle.stroke
+        ..style = PaintingStyle.fill
         ..strokeWidth = 1);
 }
 
@@ -307,12 +321,6 @@ void _centeredDrawPointsFromList(Canvas canvas, List<Point> pointsList, Size siz
   }
 
   double frameThickness = 3;
-  /*
-  maxX += frameThickness;
-  minX -= frameThickness;
-  maxY += frameThickness;
-  minY -= frameThickness;
-  */
 
   double height = maxY - minY + 2 * frameThickness;
   double width = maxX - minX + 2 * frameThickness;
@@ -324,32 +332,22 @@ void _centeredDrawPointsFromList(Canvas canvas, List<Point> pointsList, Size siz
   double scale = max(scaleHorizontal, scaleVertical);
 
   Offset p0 = (firstPoint + initialShift) / scale;
-  print(p0);
+  Offset pfirst = p0;
+  Offset p0last = p0;
   path.moveTo(p0.dx, p0.dy);
 
   final gradient = LinearGradient(
     colors: generateColors(pointsList.length),
   );
   for (int i = 1; i < pointsList.length - 1; i++) {
-    print("$i $p0");
-    Offset p0last = p0;
+    p0last = p0;
     p0 = Offset(pointsList[i].x, pointsList[i].y);
     p0 = (p0 + initialShift) / scale;
     path.lineTo(p0.dx, p0.dy);
-    //canvas.draw
 
     canvas.drawLine(p0last, p0, Paint()..color = gradient.colors[i]);
-    /*
-    canvas.drawPath(
-        path,
-        Paint()
-          ..color = DefaultDrawStrokeProperties.color
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1);
-    */
-
-    //path.fillType = PathFillType.nonZero;
   }
+  canvas.drawLine(p0last, pfirst, Paint()..color = gradient.colors.last);
 
 /*
   canvas.drawPath(
@@ -358,7 +356,7 @@ void _centeredDrawPointsFromList(Canvas canvas, List<Point> pointsList, Size siz
         ..color = DefaultDrawStrokeProperties.color
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1);
-        */
+  */
 
   canvas.drawRect(
       Rect.fromPoints((Offset(minX, minY) + initialShift) / scale, (Offset(maxX, maxY) + initialShift) / scale),
@@ -382,8 +380,8 @@ void _centeredDrawPointsFromList(Canvas canvas, List<Point> pointsList, Size siz
 }
 
 List<Color> generateColors(int numberOfColors) {
-  final Color startColor = Colors.red;
-  final Color endColor = Colors.blue;
+  const Color startColor = Colors.red;
+  const Color endColor = Colors.blue;
 
   return List.generate(numberOfColors, (index) {
     final t = index / (numberOfColors - 1);
@@ -391,9 +389,83 @@ List<Color> generateColors(int numberOfColors) {
   });
 }
 
-void _drawStroke(Canvas canvas, _Stroke stroke) {
-  List<Point>? outlinePoints = _processStroke(stroke);
-  if (outlinePoints == null) return;
+void _centeredDrawVerticesFromPointsList(Canvas canvas, List<Point> pointsList, Size size) {
+  Path path = Path();
 
-  _drawPointsFromList(canvas, outlinePoints);
+  double minX = double.infinity;
+  double minY = double.infinity;
+  double maxX = double.negativeInfinity;
+  double maxY = double.negativeInfinity;
+
+  for (int i = 1; i < pointsList.length - 1; i++) {
+    final p0 = pointsList[i];
+
+    if (p0.x < minX) minX = p0.x;
+    if (p0.x > maxX) maxX = p0.x;
+    if (p0.y < minY) minY = p0.y;
+    if (p0.y > maxY) maxY = p0.y;
+  }
+
+  double frameThickness = 3;
+
+  double height = maxY - minY + 2 * frameThickness;
+  double width = maxX - minX + 2 * frameThickness;
+
+/*
+  final dylib = DynamicLibrary.open("lib/libdelabella.dylib");
+  final getTriangleList = dylib.lookupFunction<Pointer<Float> Function(Pointer<Float>, Int32),
+      Pointer<Float> Function(Pointer<Float>, int)>('createlistoftriangles');
+      */
+
+  //final dylib = DynamicLibrary.open("lib/libdelabella.dylib");
+
+  Float32List verticesList = Float32List(pointsList.length * 2);
+  for (int i = 0; i < pointsList.length; i++) {
+    verticesList[2 * i] = pointsList[i].x;
+    verticesList[2 * i + 1] = pointsList[i].y;
+  }
+  Delaunay delaunay = Delaunay(verticesList);
+  delaunay.update();
+
+  Float32List triangleVerticesList = Float32List(delaunay.triangles.length * 2 * 3);
+  for (int i = 0; i < delaunay.triangles.length; i += 1) {
+    int triangleVertexIndex = delaunay.triangles[i];
+
+    double ax = delaunay.coords[2 * triangleVertexIndex];
+    double ay = delaunay.coords[2 * triangleVertexIndex + 1];
+    triangleVerticesList[2 * i] = ax;
+    triangleVerticesList[2 * i + 1] = ay;
+  }
+
+  //final triangleList = getTriangleList()
+
+  print(verticesList.length);
+  print(triangleVerticesList.length);
+
+  final vertices = Vertices.raw(VertexMode.triangles, triangleVerticesList);
+
+  canvas.drawVertices(vertices, BlendMode.srcOver, Paint()..color = Colors.blue);
+
+/*
+  Offset firstPoint = Offset(pointsList[0].x, pointsList[0].y);
+  Offset initialShift = Offset(-minX + frameThickness, -minY + frameThickness);
+  double scaleVertical = height / (size.height);
+  double scaleHorizontal = width / (size.width);
+  double scale = max(scaleHorizontal, scaleVertical);
+
+  Offset p0 = (firstPoint + initialShift) / scale;
+  Offset pfirst = p0;
+  Offset p0last = p0;
+  path.moveTo(p0.dx, p0.dy);
+
+  final gradient = LinearGradient(
+    colors: generateColors(pointsList.length),
+  );
+  for (int i = 1; i < pointsList.length - 1; i++) {
+    p0last = p0;
+    p0 = Offset(pointsList[i].x, pointsList[i].y);
+    p0 = (p0 + initialShift) / scale;
+
+  }
+  */
 }
