@@ -44,7 +44,7 @@ class DefaultDrawStrokeProperties {
   static const bool processAndDrawPressure = true;
 
   /// Parameters for the perfect_freehand stroke processing
-  static const double size = 5;
+  static const double size = 3;
   static const double thinning = 0; //0.2;
   static const double smoothing = 0.8; //0;
   static const double streamline = 0.5;
@@ -96,9 +96,12 @@ class _TouchTracerState extends State<_TouchTracer> {
     if (endedStroke == null) {
       return;
     }
+    /*
     final points = _processStrokeToPoints(endedStroke)!;
     final vertices = _processPointsToTriangles(points);
     _pastVertices.value.add(vertices);
+    */
+    _pastVertices.value.addAll(_createTriangulationOutlineFromRawStroke(endedStroke));
 
     ratios.add(_processStrokeToPoints(endedStroke)!.length / endedStroke.points.length);
     //print("${_processStroke(endedStroke)!.length} / ${endedStroke.points.length}");
@@ -401,4 +404,42 @@ void _drawVerticesOnCanvas(Canvas canvas, Vertices vertices) {
       Paint()
         ..color = Colors.blue
         ..style = PaintingStyle.stroke);
+}
+
+void _drawVerticesListOnCanvas(Canvas canvas, List<Vertices> verticesList) {
+  for (Vertices vertices in verticesList) {
+    canvas.drawVertices(
+        vertices,
+        BlendMode.srcOver,
+        Paint()
+          ..color = Colors.blue
+          ..style = PaintingStyle.stroke);
+  }
+}
+
+List<Vertices> _createTriangulationOutlineFromRawStroke(_Stroke stroke) {
+  final points = stroke.points;
+
+  //List<Offset> pointsSurrounding = [];
+  final positions = Float32List(points.length * 4);
+
+  for (int i = 0; i < points.length; i++) {
+    late final Offset vectorAlongPath;
+    late Offset vectorPerpendicularToPath;
+    if (i == points.length - 1) {
+      vectorAlongPath = points[i] - points[i - 1];
+    } else {
+      vectorAlongPath = points[i + 1] - points[i];
+    }
+    vectorPerpendicularToPath = Offset(-vectorAlongPath.dy, vectorAlongPath.dx);
+    vectorPerpendicularToPath *= DefaultDrawStrokeProperties.size /
+        vectorPerpendicularToPath.distance; //pointsSurrounding.add(points[i] + unitVectorPerpendicularToPath);
+    //pointsSurrounding.add(points[i] - unitVectorPerpendicularToPath);
+    positions[4 * i] = points[i].dx + vectorPerpendicularToPath.dx;
+    positions[4 * i + 1] = points[i].dy + vectorPerpendicularToPath.dy;
+    positions[4 * i + 2] = points[i].dx - vectorPerpendicularToPath.dx;
+    positions[4 * i + 3] = points[i].dy - vectorPerpendicularToPath.dy;
+  }
+
+  return [Vertices.raw(VertexMode.triangleStrip, positions)];
 }
