@@ -29,8 +29,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-final List<double> ratios = [];
-
 // Home of the project
 class _TouchTracer extends StatefulWidget {
   const _TouchTracer();
@@ -44,7 +42,7 @@ class DefaultDrawStrokeProperties {
   static const bool processAndDrawPressure = true;
 
   /// Parameters for the perfect_freehand stroke processing
-  static const double size = 3;
+  static const double size = 10;
   static const double thinning = 0; //0.2;
   static const double smoothing = 0.8; //0;
   static const double streamline = 0.5;
@@ -61,67 +59,67 @@ class DefaultDrawStrokeProperties {
   static const bool drawDelaunay = true;
 }
 
-// State of teh touch tracer
+// State of the touch tracer
 class _TouchTracerState extends State<_TouchTracer> {
-  // one empty stroke stored in the past strokes
-  final _pastVertices = ValueNotifier<List<Vertices>>([]);
+  // Initialize an empty list of points
+  final _pastTrianglePoints = ValueNotifier<Float32List>(Float32List(0));
 
   // Value notifier initialized to be an empty stroke
-  final _currentStroke = ValueNotifier<_Stroke?>(null);
+  final _currentStroke = ValueNotifier<List<Point>?>(null);
 
   @override
   void dispose() {
     super.dispose();
-    _pastVertices.dispose();
     _currentStroke.dispose();
   }
 
   void _onPointerDown(PointerDownEvent event) {
-    _currentStroke.value = const _Stroke([], DefaultDrawStrokeProperties.processAndDrawPressure ? [] : null);
+    _currentStroke.value = [];
   }
 
   void _onPointerMove(PointerMoveEvent event) {
-    final currentStroke = _currentStroke.value;
-    if (currentStroke == null) {
+    if (_currentStroke.value == null) {
       return;
     }
     // If [processAndDrawPressure] is set to true, pressure value is
-    // going to be either the reported physical pressure or 1.0
-    _currentStroke.value = currentStroke.copyWithPoint(
-        event.localPosition, DefaultDrawStrokeProperties.processAndDrawPressure ? event.pressure : null);
+    // going to be the reported physical pressure, else 1.0
+    _currentStroke.value!.add(Point(event.localPosition.dx, event.localPosition.dy,
+        DefaultDrawStrokeProperties.processAndDrawPressure ? event.pressure : 1.0));
+    setState(() {
+      _currentStroke.value = _currentStroke.value!.toList();
+    });
   }
 
   void _onPointerEnd(PointerUpEvent event) {
     final endedStroke = _currentStroke.value;
-    if (endedStroke == null) {
+    if (endedStroke == null || endedStroke.isEmpty) {
       return;
     }
+
+    final List<Point> outlinePoints = _getOutlineWithPerfectFreehand(endedStroke);
+    _pastTrianglePoints.value =
+        joinFloat32Lists(_pastTrianglePoints.value, _processPointsToLibtess2Triangles(outlinePoints));
+
     /*
-    final points = _processStrokeToPoints(endedStroke)!;
-    final vertices = _processPointsToTriangles(points);
-    _pastVertices.value.add(vertices);
-    */
-    _pastVertices.value.addAll(_createTriangulationOutlineFromRawStroke(endedStroke));
+    _pastTrianglePoints.value = joinFloat32Lists(
+        _pastTrianglePoints.value, _createThickTriangulationStripFloat32ListFromRawStroke(endedStroke));
+      */
 
-    ratios.add(_processStrokeToPoints(endedStroke)!.length / endedStroke.points.length);
-    //print("${_processStroke(endedStroke)!.length} / ${endedStroke.points.length}");
-    //print(ratios.reduce((a, b) => a + b) / ratios.length);
-
-    // set copy to trigger re-draw
-    _pastVertices.value = _pastVertices.value.toList();
     _currentStroke.value = null;
   }
 
   void _onClearStrokes() {
-    _pastVertices.value = [];
+    _pastTrianglePoints.value = Float32List(0);
   }
 
   void _onUndoLastStroke() {
     // Run twice because the press of the button is a stroke
-    // TODO fix
-    _pastVertices.value.removeLast();
-    _pastVertices.value.removeLast();
-    _pastVertices.value = _pastVertices.value.toList();
+    _pastTrianglePoints.value.removeLast();
+    _pastTrianglePoints.value.removeLast();
+  }
+
+  void _onPrintNumberOfPoints() {
+    print(_pastTrianglePoints.value.length);
   }
 
   @override
@@ -135,7 +133,7 @@ class _TouchTracerState extends State<_TouchTracer> {
           children: [
             Positioned.fill(
               child: CustomPaint(
-                painter: _PastStrokePainter(listener: _pastVertices),
+                painter: _PastStrokePainter(listener: _pastTrianglePoints),
               ),
             ),
             Positioned.fill(
@@ -143,13 +141,12 @@ class _TouchTracerState extends State<_TouchTracer> {
             ),
             Align(
               alignment: Alignment.bottomRight,
-              child: SizedBox(
-                width: 100,
-                height: 100,
+              child: IntrinsicWidth(
                 child: Row(
                   children: [
                     IconButton(onPressed: _onClearStrokes, icon: const Icon(Icons.ac_unit_outlined)),
                     IconButton(onPressed: _onUndoLastStroke, icon: const Icon(Icons.undo)),
+                    IconButton(onPressed: _onPrintNumberOfPoints, icon: const Icon(Icons.turn_sharp_left)),
                   ],
                 ),
               ),
@@ -161,32 +158,9 @@ class _TouchTracerState extends State<_TouchTracer> {
   }
 }
 
-class _Stroke {
-  const _Stroke(this.points, [this.pressures]);
-  final List<Offset> points;
-  // This list won't be initialized if [processAndDrawPressure] is false.
-  final List<double>? pressures;
-
-  // Add a point to the copy of list of points and return this new extended copy
-  _Stroke copyWithPoint(Offset point, [double? pressure]) {
-    List<double>? newPressures;
-    final newPoints = points.toList();
-    // If pressures are collected, [processAndDrawPressure] is set true, the list
-    // of pressures is not null and the pressure value is not null.
-    // The list [pressures] is then always the same length as the list [points].
-    if (pressures != null && pressure != null) {
-      newPressures = pressures?.toList();
-      newPressures?.add(pressure);
-    }
-    newPoints.add(point);
-    return _Stroke(newPoints, newPressures);
-  }
-}
-
 class _PastStrokePainter extends CustomPainter {
   const _PastStrokePainter({required this.listener}) : super(repaint: listener);
-  //final ValueNotifier<List<List<Point>>> listener;
-  final ValueNotifier<List<Vertices>> listener;
+  final ValueNotifier<Float32List> listener;
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) {
@@ -200,16 +174,13 @@ class _PastStrokePainter extends CustomPainter {
       return;
     }
 
-    for (var vertices in verticesList) {
-      //_centeredDrawPointsFromList(canvas, pointList, size);
-      _drawVerticesOnCanvas(canvas, vertices);
-    }
+    _drawVerticesOnCanvas(canvas, Vertices.raw(VertexMode.triangles, verticesList));
   }
 }
 
 class _CurrentStrokePainter extends CustomPainter {
   const _CurrentStrokePainter({required this.listener}) : super(repaint: listener);
-  final ValueNotifier<_Stroke?> listener;
+  final ValueNotifier<List<Point>?> listener;
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) {
@@ -223,31 +194,14 @@ class _CurrentStrokePainter extends CustomPainter {
       return;
     }
 
-    List<Point>? outlinePoints = _processStrokeToPoints(stroke);
+    List<Point> outlinePoints = _getOutlineWithPerfectFreehand(stroke);
 
-    //_centeredDrawVerticesFromPointsList(canvas, outlinePoints!, size);
-    _drawPointsFromList(canvas, outlinePoints!);
+    _drawPointsAsPath(canvas, outlinePoints);
+    _drawEnlargedStrokeOutlineWithBox(canvas, outlinePoints, size);
   }
 }
 
-List<Point>? _processStrokeToPoints(_Stroke stroke) {
-  if (stroke.points.isEmpty) {
-    return null;
-  }
-
-  final List<Point> pointsList = List.filled(stroke.points.length, const Point(0, 0), growable: false);
-  for (var i = 0; i <= stroke.points.length - 1; i++) {
-    late final Point point;
-    if (stroke.pressures != null) {
-      point = Point(stroke.points[i].dx, stroke.points[i].dy, stroke.pressures![i]);
-    } else {
-      point = Point(stroke.points[i].dx, stroke.points[i].dy);
-    }
-    pointsList[i] = point;
-  }
-
-  //final points = stroke.points.map((e, i) => Point(e.dx, e.dy, ))
-
+List<Point> _getOutlineWithPerfectFreehand(List<Point> pointsList) {
   final outlinePoints = getStroke(
     pointsList,
     size: DefaultDrawStrokeProperties.size,
@@ -260,13 +214,11 @@ List<Point>? _processStrokeToPoints(_Stroke stroke) {
     capEnd: DefaultDrawStrokeProperties.capEnd,
     simulatePressure: DefaultDrawStrokeProperties.simulatePressure,
   );
-  //print("${pointsList.length} -> ${outlinePoints.length}");
-
   return outlinePoints;
 }
 
 // Draw an already processed path
-void _drawPointsFromList(Canvas canvas, List<Point> pointsList) {
+void _drawPointsAsPath(Canvas canvas, List<Point> pointsList) {
   final path = Path();
 
   // Otherwise, draw a line that connects each point with a bezier curve segment.
@@ -292,7 +244,6 @@ void _drawPointsFromList(Canvas canvas, List<Point> pointsList) {
         break;
     }
   }
-
   canvas.drawPath(
       path,
       Paint()
@@ -301,7 +252,7 @@ void _drawPointsFromList(Canvas canvas, List<Point> pointsList) {
         ..strokeWidth = 1);
 }
 
-void _centeredDrawPointsFromList(Canvas canvas, List<Point> pointsList, Size size) {
+void _drawEnlargedStrokeOutlineWithBox(Canvas canvas, List<Point> pointsList, Size size) {
   Path path = Path();
 
   double minX = double.infinity;
@@ -365,7 +316,7 @@ List<Color> generateColors(int numberOfColors) {
   });
 }
 
-Vertices _processPointsToTriangles(List<Point> pointsList) {
+Float32List _processPointsToDelaunayTriangles(List<Point> pointsList) {
   Float32List verticesList = Float32List(pointsList.length * 2);
   for (int i = 0; i < pointsList.length; i++) {
     verticesList[2 * i] = pointsList[i].x;
@@ -384,44 +335,46 @@ Vertices _processPointsToTriangles(List<Point> pointsList) {
     triangleVerticesList[2 * i + 1] = ay;
   }
 
-  final vertices = Vertices.raw(VertexMode.triangles, triangleVerticesList);
+  return triangleVerticesList;
+}
 
-  return vertices;
+Float32List _processPointsToLibtess2Triangles(List<Point> pointsList) {
+  Float32List verticesList = Float32List(pointsList.length * 2);
+  for (int i = 0; i < pointsList.length; i++) {
+    verticesList[2 * i] = pointsList[i].x;
+    verticesList[2 * i + 1] = pointsList[i].y;
+  }
+  Delaunay delaunay = Delaunay(verticesList);
+  delaunay.update();
+
+  Float32List triangleVerticesList = Float32List(delaunay.triangles.length * 2 * 3);
+  for (int i = 0; i < delaunay.triangles.length; i += 1) {
+    print(i);
+    int triangleVertexIndex = delaunay.triangles[i];
+
+    double ax = delaunay.coords[2 * triangleVertexIndex];
+    double ay = delaunay.coords[2 * triangleVertexIndex + 1];
+    triangleVerticesList[2 * i] = ax;
+    triangleVerticesList[2 * i + 1] = ay;
+  }
+
+  return triangleVerticesList;
 }
 
 void _drawVerticesOnCanvas(Canvas canvas, Vertices vertices) {
-/*
-  final dylib = DynamicLibrary.open("lib/libdelabella.dylib");
-  final getTriangleList = dylib.lookupFunction<Pointer<Float> Function(Pointer<Float>, Int32),
-      Pointer<Float> Function(Pointer<Float>, int)>('createlistoftriangles');
-      */
-
-  //final dylib = DynamicLibrary.open("lib/libdelabella.dylib");
-
   canvas.drawVertices(
       vertices,
       BlendMode.srcOver,
       Paint()
         ..color = Colors.blue
-        ..style = PaintingStyle.stroke);
+        ..style = PaintingStyle.stroke // style doesn't matter for vertices
+      );
 }
 
-void _drawVerticesListOnCanvas(Canvas canvas, List<Vertices> verticesList) {
-  for (Vertices vertices in verticesList) {
-    canvas.drawVertices(
-        vertices,
-        BlendMode.srcOver,
-        Paint()
-          ..color = Colors.blue
-          ..style = PaintingStyle.stroke);
-  }
-}
-
-List<Vertices> _createTriangulationOutlineFromRawStroke(_Stroke stroke) {
-  final points = stroke.points;
-
-  //List<Offset> pointsSurrounding = [];
-  final positions = Float32List(points.length * 4);
+Float32List _createThickTriangulationStripFloat32ListFromRawStroke(List<Point> pointsWithPressure) {
+  final points = pointsWithPressure.map((e) => Offset(e.x, e.y)).toList();
+  late final positions;
+  positions = Float32List(points.length * 2 * 2);
 
   for (int i = 0; i < points.length; i++) {
     late final Offset vectorAlongPath;
@@ -432,14 +385,18 @@ List<Vertices> _createTriangulationOutlineFromRawStroke(_Stroke stroke) {
       vectorAlongPath = points[i + 1] - points[i];
     }
     vectorPerpendicularToPath = Offset(-vectorAlongPath.dy, vectorAlongPath.dx);
-    vectorPerpendicularToPath *= DefaultDrawStrokeProperties.size /
-        vectorPerpendicularToPath.distance; //pointsSurrounding.add(points[i] + unitVectorPerpendicularToPath);
-    //pointsSurrounding.add(points[i] - unitVectorPerpendicularToPath);
+    vectorPerpendicularToPath *= DefaultDrawStrokeProperties.size / vectorPerpendicularToPath.distance;
     positions[4 * i] = points[i].dx + vectorPerpendicularToPath.dx;
     positions[4 * i + 1] = points[i].dy + vectorPerpendicularToPath.dy;
     positions[4 * i + 2] = points[i].dx - vectorPerpendicularToPath.dx;
     positions[4 * i + 3] = points[i].dy - vectorPerpendicularToPath.dy;
   }
+  return positions;
+}
 
-  return [Vertices.raw(VertexMode.triangleStrip, positions)];
+Float32List joinFloat32Lists(Float32List list1, Float32List list2) {
+  Float32List concatenatedList = Float32List(list1.length + list2.length);
+  concatenatedList.setAll(0, list1);
+  concatenatedList.setAll(list1.length, list2);
+  return concatenatedList;
 }
