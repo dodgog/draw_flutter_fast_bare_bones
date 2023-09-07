@@ -5,10 +5,13 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:fontrender/fontrender.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
 import 'package:delaunay/delaunay.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-void main() {
+void main() async {
+  Font.loadSharedLibrary(await ensureFontLibraryExtracted());
   runApp(const MyApp());
 }
 
@@ -43,7 +46,7 @@ class DefaultDrawStrokeProperties {
 
   /// Parameters for the perfect_freehand stroke processing
   static const double size = 10;
-  static const double thinning = 0; //0.2;
+  static const double thinning = 0.8; //0.2;
   static const double smoothing = 0.8; //0;
   static const double streamline = 0.5;
   static const double taperStart = 0;
@@ -197,7 +200,7 @@ class _CurrentStrokePainter extends CustomPainter {
     List<Point> outlinePoints = _getOutlineWithPerfectFreehand(stroke);
 
     _drawPointsAsPath(canvas, outlinePoints);
-    _drawEnlargedStrokeOutlineWithBox(canvas, outlinePoints, size);
+    //_drawEnlargedStrokeOutlineWithBox(canvas, outlinePoints, size);
   }
 }
 
@@ -339,26 +342,21 @@ Float32List _processPointsToDelaunayTriangles(List<Point> pointsList) {
 }
 
 Float32List _processPointsToLibtess2Triangles(List<Point> pointsList) {
-  Float32List verticesList = Float32List(pointsList.length * 2);
-  for (int i = 0; i < pointsList.length; i++) {
-    verticesList[2 * i] = pointsList[i].x;
-    verticesList[2 * i + 1] = pointsList[i].y;
+  final tess = Tess();
+
+  final vectorPoints = pointsList.map((e) => Vector2(e.x, e.y)).toList();
+  tess.addContour(vectorPoints);
+
+  final result = tess.tessellate();
+  final trinagles = result.triangles();
+
+  final Float32List verticesList = Float32List(trinagles.length * 2);
+
+  for (int i = 0; i < trinagles.length; i++) {
+    verticesList[2 * i] = trinagles[i].x;
+    verticesList[2 * i + 1] = trinagles[i].y;
   }
-  Delaunay delaunay = Delaunay(verticesList);
-  delaunay.update();
-
-  Float32List triangleVerticesList = Float32List(delaunay.triangles.length * 2 * 3);
-  for (int i = 0; i < delaunay.triangles.length; i += 1) {
-    print(i);
-    int triangleVertexIndex = delaunay.triangles[i];
-
-    double ax = delaunay.coords[2 * triangleVertexIndex];
-    double ay = delaunay.coords[2 * triangleVertexIndex + 1];
-    triangleVerticesList[2 * i] = ax;
-    triangleVerticesList[2 * i + 1] = ay;
-  }
-
-  return triangleVerticesList;
+  return verticesList;
 }
 
 void _drawVerticesOnCanvas(Canvas canvas, Vertices vertices) {
@@ -373,8 +371,7 @@ void _drawVerticesOnCanvas(Canvas canvas, Vertices vertices) {
 
 Float32List _createThickTriangulationStripFloat32ListFromRawStroke(List<Point> pointsWithPressure) {
   final points = pointsWithPressure.map((e) => Offset(e.x, e.y)).toList();
-  late final positions;
-  positions = Float32List(points.length * 2 * 2);
+  final positions = Float32List(points.length * 2 * 2);
 
   for (int i = 0; i < points.length; i++) {
     late final Offset vectorAlongPath;

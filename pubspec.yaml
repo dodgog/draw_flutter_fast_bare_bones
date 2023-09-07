@@ -40,6 +40,11 @@ dependencies:
       url: https://github.com/dodgog/perfect-freehand-dart/
       ref: clean-caps
   delaunay: ^2.0.0
+  fontrender:
+    git:
+      url: https://github.com/makedaylight/flutter_pdf_renderer
+      path: ./glyph_rendering/fontrender
+  vector_math: ^2.1.4
 
 dev_dependencies:
   flutter_test:
