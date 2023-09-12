@@ -47,7 +47,7 @@ class DefaultDrawStrokeProperties {
   /// Parameters for the perfect_freehand stroke processing
   static const double size = 10;
   static const double thinning = 0.8; //0.2;
-  static const double smoothing = 0.8; //0;
+  static const double smoothing = 0.2; //0;
   static const double streamline = 0.5;
   static const double taperStart = 0;
   static const double taperEnd = 0;
@@ -56,7 +56,7 @@ class DefaultDrawStrokeProperties {
   static const bool simulatePressure = false;
 
   /// Parameters for flutter's Path drawing
-  static const Color color = Color.fromARGB(255, 97, 25, 74);
+  static const Color color = Color.fromARGB(255, 32, 16, 27);
   static const int powerOfPathCurveDrawnOnCanvas = 1;
 
   static const bool drawDelaunay = true;
@@ -64,6 +64,7 @@ class DefaultDrawStrokeProperties {
 
 // State of the touch tracer
 class _TouchTracerState extends State<_TouchTracer> {
+  final _downscaleMatrix = Matrix4.identity()..scale(0.5, 0.5);
   // Initialize an empty list of points
   final _pastTrianglePoints = ValueNotifier<Float32List>(Float32List(0));
 
@@ -135,10 +136,15 @@ class _TouchTracerState extends State<_TouchTracer> {
         child: Stack(
           children: [
             Positioned.fill(
+                child: ImageFiltered(
+              imageFilter: ImageFilter.matrix(
+                _downscaleMatrix.storage,
+                filterQuality: FilterQuality.low,
+              ),
               child: CustomPaint(
                 painter: _PastStrokePainter(listener: _pastTrianglePoints),
               ),
-            ),
+            )),
             Positioned.fill(
               child: CustomPaint(painter: _CurrentStrokePainter(listener: _currentStroke)),
             ),
@@ -177,6 +183,8 @@ class _PastStrokePainter extends CustomPainter {
       return;
     }
 
+    canvas.scale(2);
+
     _drawVerticesOnCanvas(canvas, Vertices.raw(VertexMode.triangles, verticesList));
   }
 }
@@ -200,7 +208,6 @@ class _CurrentStrokePainter extends CustomPainter {
     List<Point> outlinePoints = _getOutlineWithPerfectFreehand(stroke);
 
     _drawPointsAsPath(canvas, outlinePoints);
-    //_drawEnlargedStrokeOutlineWithBox(canvas, outlinePoints, size);
   }
 }
 
@@ -255,92 +262,6 @@ void _drawPointsAsPath(Canvas canvas, List<Point> pointsList) {
         ..strokeWidth = 1);
 }
 
-void _drawEnlargedStrokeOutlineWithBox(Canvas canvas, List<Point> pointsList, Size size) {
-  Path path = Path();
-
-  double minX = double.infinity;
-  double minY = double.infinity;
-  double maxX = double.negativeInfinity;
-  double maxY = double.negativeInfinity;
-
-  for (int i = 1; i < pointsList.length - 1; i++) {
-    final p0 = pointsList[i];
-
-    if (p0.x < minX) minX = p0.x;
-    if (p0.x > maxX) maxX = p0.x;
-    if (p0.y < minY) minY = p0.y;
-    if (p0.y > maxY) maxY = p0.y;
-  }
-
-  double frameThickness = 3;
-
-  double height = maxY - minY + 2 * frameThickness;
-  double width = maxX - minX + 2 * frameThickness;
-
-  Offset firstPoint = Offset(pointsList[0].x, pointsList[0].y);
-  Offset initialShift = Offset(-minX + frameThickness, -minY + frameThickness);
-  double scaleVertical = height / (size.height);
-  double scaleHorizontal = width / (size.width);
-  double scale = max(scaleHorizontal, scaleVertical);
-
-  Offset p0 = (firstPoint + initialShift) / scale;
-  Offset pfirst = p0;
-  Offset p0last = p0;
-  path.moveTo(p0.dx, p0.dy);
-
-  final gradient = LinearGradient(
-    colors: generateColors(pointsList.length),
-  );
-  for (int i = 1; i < pointsList.length - 1; i++) {
-    p0last = p0;
-    p0 = Offset(pointsList[i].x, pointsList[i].y);
-    p0 = (p0 + initialShift) / scale;
-    path.lineTo(p0.dx, p0.dy);
-
-    canvas.drawLine(p0last, p0, Paint()..color = gradient.colors[i]);
-  }
-  canvas.drawLine(p0last, pfirst, Paint()..color = gradient.colors.last);
-
-  canvas.drawRect(
-      Rect.fromPoints((Offset(minX, minY) + initialShift) / scale, (Offset(maxX, maxY) + initialShift) / scale),
-      Paint()
-        ..color = Colors.black
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1);
-}
-
-List<Color> generateColors(int numberOfColors) {
-  const Color startColor = Colors.red;
-  const Color endColor = Colors.blue;
-
-  return List.generate(numberOfColors, (index) {
-    final t = index / (numberOfColors - 1);
-    return Color.lerp(startColor, endColor, t)!;
-  });
-}
-
-Float32List _processPointsToDelaunayTriangles(List<Point> pointsList) {
-  Float32List verticesList = Float32List(pointsList.length * 2);
-  for (int i = 0; i < pointsList.length; i++) {
-    verticesList[2 * i] = pointsList[i].x;
-    verticesList[2 * i + 1] = pointsList[i].y;
-  }
-  Delaunay delaunay = Delaunay(verticesList);
-  delaunay.update();
-
-  Float32List triangleVerticesList = Float32List(delaunay.triangles.length * 2 * 3);
-  for (int i = 0; i < delaunay.triangles.length; i += 1) {
-    int triangleVertexIndex = delaunay.triangles[i];
-
-    double ax = delaunay.coords[2 * triangleVertexIndex];
-    double ay = delaunay.coords[2 * triangleVertexIndex + 1];
-    triangleVerticesList[2 * i] = ax;
-    triangleVerticesList[2 * i + 1] = ay;
-  }
-
-  return triangleVerticesList;
-}
-
 Float32List _processPointsToLibtess2Triangles(List<Point> pointsList) {
   final tess = Tess();
 
@@ -364,31 +285,9 @@ void _drawVerticesOnCanvas(Canvas canvas, Vertices vertices) {
       vertices,
       BlendMode.srcOver,
       Paint()
-        ..color = Colors.blue
+        ..color = DefaultDrawStrokeProperties.color
         ..style = PaintingStyle.stroke // style doesn't matter for vertices
       );
-}
-
-Float32List _createThickTriangulationStripFloat32ListFromRawStroke(List<Point> pointsWithPressure) {
-  final points = pointsWithPressure.map((e) => Offset(e.x, e.y)).toList();
-  final positions = Float32List(points.length * 2 * 2);
-
-  for (int i = 0; i < points.length; i++) {
-    late final Offset vectorAlongPath;
-    late Offset vectorPerpendicularToPath;
-    if (i == points.length - 1) {
-      vectorAlongPath = points[i] - points[i - 1];
-    } else {
-      vectorAlongPath = points[i + 1] - points[i];
-    }
-    vectorPerpendicularToPath = Offset(-vectorAlongPath.dy, vectorAlongPath.dx);
-    vectorPerpendicularToPath *= DefaultDrawStrokeProperties.size / vectorPerpendicularToPath.distance;
-    positions[4 * i] = points[i].dx + vectorPerpendicularToPath.dx;
-    positions[4 * i + 1] = points[i].dy + vectorPerpendicularToPath.dy;
-    positions[4 * i + 2] = points[i].dx - vectorPerpendicularToPath.dx;
-    positions[4 * i + 3] = points[i].dy - vectorPerpendicularToPath.dy;
-  }
-  return positions;
 }
 
 Float32List joinFloat32Lists(Float32List list1, Float32List list2) {
