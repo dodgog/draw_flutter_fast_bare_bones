@@ -1,13 +1,9 @@
-import 'dart:ffi' hide Size;
-import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:fontrender/fontrender.dart';
 import 'package:perfect_freehand/perfect_freehand.dart';
-import 'package:delaunay/delaunay.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 void main() async {
@@ -64,7 +60,6 @@ class DefaultDrawStrokeProperties {
 
 // State of the touch tracer
 class _TouchTracerState extends State<_TouchTracer> {
-  final _downscaleMatrix = Matrix4.identity()..scale(0.5, 0.5);
   // Initialize an empty list of points
   final _pastTrianglePoints = ValueNotifier<Float32List>(Float32List(0));
 
@@ -104,22 +99,11 @@ class _TouchTracerState extends State<_TouchTracer> {
     _pastTrianglePoints.value =
         joinFloat32Lists(_pastTrianglePoints.value, _processPointsToLibtess2Triangles(outlinePoints));
 
-    /*
-    _pastTrianglePoints.value = joinFloat32Lists(
-        _pastTrianglePoints.value, _createThickTriangulationStripFloat32ListFromRawStroke(endedStroke));
-      */
-
     _currentStroke.value = null;
   }
 
   void _onClearStrokes() {
     _pastTrianglePoints.value = Float32List(0);
-  }
-
-  void _onUndoLastStroke() {
-    // Run twice because the press of the button is a stroke
-    _pastTrianglePoints.value.removeLast();
-    _pastTrianglePoints.value.removeLast();
   }
 
   void _onPrintNumberOfPoints() {
@@ -136,14 +120,8 @@ class _TouchTracerState extends State<_TouchTracer> {
         child: Stack(
           children: [
             Positioned.fill(
-                child: ImageFiltered(
-              imageFilter: ImageFilter.matrix(
-                _downscaleMatrix.storage,
-                filterQuality: FilterQuality.low,
-              ),
-              child: CustomPaint(
-                painter: _PastStrokePainter(listener: _pastTrianglePoints),
-              ),
+                child: CustomPaint(
+              painter: _PastStrokePainter(listener: _pastTrianglePoints),
             )),
             Positioned.fill(
               child: CustomPaint(painter: _CurrentStrokePainter(listener: _currentStroke)),
@@ -154,7 +132,6 @@ class _TouchTracerState extends State<_TouchTracer> {
                 child: Row(
                   children: [
                     IconButton(onPressed: _onClearStrokes, icon: const Icon(Icons.ac_unit_outlined)),
-                    IconButton(onPressed: _onUndoLastStroke, icon: const Icon(Icons.undo)),
                     IconButton(onPressed: _onPrintNumberOfPoints, icon: const Icon(Icons.turn_sharp_left)),
                   ],
                 ),
@@ -182,8 +159,6 @@ class _PastStrokePainter extends CustomPainter {
     if (verticesList.isEmpty) {
       return;
     }
-
-    canvas.scale(2);
 
     _drawVerticesOnCanvas(canvas, Vertices.raw(VertexMode.triangles, verticesList));
   }
@@ -281,13 +256,7 @@ Float32List _processPointsToLibtess2Triangles(List<Point> pointsList) {
 }
 
 void _drawVerticesOnCanvas(Canvas canvas, Vertices vertices) {
-  canvas.drawVertices(
-      vertices,
-      BlendMode.srcOver,
-      Paint()
-        ..color = DefaultDrawStrokeProperties.color
-        ..style = PaintingStyle.stroke // style doesn't matter for vertices
-      );
+  canvas.drawVertices(vertices, BlendMode.srcOver, Paint()..color = DefaultDrawStrokeProperties.color);
 }
 
 Float32List joinFloat32Lists(Float32List list1, Float32List list2) {
